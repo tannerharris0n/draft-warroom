@@ -32,7 +32,9 @@ const LEAGUE_PRESETS = [
   { name: "Andy And The Boys", teams: 10, keeper: true },
 ];
 
-const LS_KEY = "ffdraft:v1";
+const lsKey = (league) => "ffdraft:v2:" + league;
+const LAST_LEAGUE_KEY = "ffdraft:lastLeague";
+const loadLeague = (league) => { try { return JSON.parse(localStorage.getItem(lsKey(league)) || "null"); } catch (_) { return null; } };
 const norm = (s) => (s || "").toLowerCase().replace(/[.'’\-]/g, "").replace(/\b(jr|sr|ii|iii|iv|v)\b/g, "").replace(/\s+/g, " ").trim();
 
 // snake math
@@ -119,21 +121,27 @@ export default function App() {
     }
   }, []);
 
+  const applySaved = (saved) => {
+    setPicks(saved?.picks || []); setKeepers(saved?.keepers || []);
+    setQueue(saved?.queue || []); setEspnLeagueId(saved?.espnLeagueId || "");
+    if (saved?.cfg) setCfg((c) => ({ ...c, ...saved.cfg }));
+  };
+
   useEffect(() => {
-    loadBoard(cfg.teams);
-    try {
-      const saved = JSON.parse(localStorage.getItem(LS_KEY) || "null");
-      if (saved?.picks?.length) {
-        setCfg(saved.cfg); setPicks(saved.picks); setKeepers(saved.keepers || []);
-        setQueue(saved.queue || []); setEspnLeagueId(saved.espnLeagueId || "");
-      }
-    } catch (_) {}
+    const league = localStorage.getItem(LAST_LEAGUE_KEY) || cfg.league;
+    const preset = LEAGUE_PRESETS.find((x) => x.name === league);
+    const saved = loadLeague(league);
+    const teams = saved?.cfg?.teams || (preset ? preset.teams : cfg.teams);
+    setCfg((c) => ({ ...c, league, teams, keeper: preset ? preset.keeper : c.keeper }));
+    applySaved(saved);
+    loadBoard(teams);
     // eslint-disable-next-line
   }, []);
 
   useEffect(() => {
     if (phase !== "draft") return;
-    localStorage.setItem(LS_KEY, JSON.stringify({ cfg, picks, keepers, queue, espnLeagueId }));
+    localStorage.setItem(lsKey(cfg.league), JSON.stringify({ cfg, picks, keepers, queue, espnLeagueId }));
+    localStorage.setItem(LAST_LEAGUE_KEY, cfg.league);
   }, [phase, cfg, picks, keepers, queue, espnLeagueId]);
 
   // ---------- derived ----------
@@ -411,7 +419,7 @@ Respond ONLY with JSON, no fences:
 
   // ---------- SETUP ----------
   if (phase === "setup") {
-    const savedDraft = picks.length > 0;
+    const savedDraft = picks.length > 0 || keepers.length > 0;
     return (
       <div className="wr"><style>{css}</style>
         <div style={{ padding: "34px 18px 24px" }}>
@@ -424,10 +432,12 @@ Respond ONLY with JSON, no fences:
 
           {savedDraft && (
             <div className="card" style={{ marginBottom: 18, borderColor: "var(--amber)" }}>
-              <div className="disp" style={{ fontWeight: 700, fontSize: 16, color: "var(--amber)" }}>DRAFT IN PROGRESS — {picks.length} picks</div>
+              <div className="disp" style={{ fontWeight: 700, fontSize: 16, color: "var(--amber)" }}>
+                SAVED — {cfg.league}: {picks.length} picks{keepers.length ? ` · ${keepers.length} keepers` : ""}
+              </div>
               <div style={{ display: "flex", gap: 8, marginTop: 10 }}>
                 <button className="btn p" onClick={() => setPhase("draft")}>RESUME</button>
-                <button className="btn g" onClick={() => { setPicks([]); setKeepers([]); setQueue([]); localStorage.removeItem(LS_KEY); }}>DISCARD</button>
+                <button className="btn g" onClick={() => { setPicks([]); setKeepers([]); setQueue([]); localStorage.removeItem(lsKey(cfg.league)); }}>DISCARD</button>
               </div>
             </div>
           )}
@@ -436,9 +446,13 @@ Respond ONLY with JSON, no fences:
             <div>
               <div style={{ fontSize: 11, color: "var(--dim)", marginBottom: 6 }}>LEAGUE</div>
               <select value={cfg.league} onChange={(e) => {
-                const p = LEAGUE_PRESETS.find((x) => x.name === e.target.value);
-                const teams = p ? p.teams : cfg.teams;
-                setCfg((c) => ({ ...c, league: e.target.value, teams, keeper: p ? p.keeper : false }));
+                const league = e.target.value;
+                const p = LEAGUE_PRESETS.find((x) => x.name === league);
+                const saved = loadLeague(league);
+                const teams = saved?.cfg?.teams || (p ? p.teams : cfg.teams);
+                setCfg((c) => ({ ...c, league, teams, keeper: p ? p.keeper : false }));
+                applySaved(saved);
+                localStorage.setItem(LAST_LEAGUE_KEY, league);
                 loadBoard(teams);
               }}>
                 {LEAGUE_PRESETS.map((p) => <option key={p.name}>{p.name}</option>)}
@@ -453,8 +467,8 @@ Respond ONLY with JSON, no fences:
               <div><div style={{ fontSize: 11, color: "var(--dim)", marginBottom: 6 }}>ROUNDS</div>
                 <input type="number" min="8" max="25" value={cfg.rounds} onChange={(e) => setCfg((c) => ({ ...c, rounds: +e.target.value || 16 }))} /></div>
             </div>
-            <button className="btn p" style={{ padding: 14, fontSize: 18 }} onClick={() => { setPicks([]); localStorage.removeItem(LS_KEY); setPhase("draft"); }}>
-              ENTER THE WAR ROOM →
+            <button className="btn p" style={{ padding: 14, fontSize: 18 }} onClick={() => { setPicks([]); setQueue([]); localStorage.setItem(LAST_LEAGUE_KEY, cfg.league); setPhase("draft"); }}>
+              {picks.length ? "START FRESH DRAFT →" : "ENTER THE WAR ROOM →"}
             </button>
             <div style={{ color: "var(--dim)", fontSize: 11, lineHeight: 1.6 }}>
               Rankings: FantasyCalc consensus + Fantasy Football Calculator ADP + Sleeper 2025 PPR results, refreshed live. Auto-capture picks via ESPN Sync or Screen OCR in the SYNC tab.
@@ -478,6 +492,7 @@ Respond ONLY with JSON, no fences:
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
           <div className="brand">◤ WAR ROOM</div>
           <div style={{ display: "flex", gap: 6 }}>
+            <button className="chip" onClick={() => { if (watcherRef.current) stopOcr(); setEspnOn(false); setPhase("setup"); }}>⌂ HOME</button>
             {cfg.keeper && <button className="chip" onClick={() => setShowKeeperModal(true)}>KEEPERS</button>}
             <button className="chip" onClick={() => setShowAddModal(true)}>+ PLAYER</button>
             <button className="chip" onClick={undo} disabled={!picks.length} style={{ opacity: picks.length ? 1 : 0.4 }}>UNDO</button>
