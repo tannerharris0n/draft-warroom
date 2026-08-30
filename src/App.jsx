@@ -70,6 +70,7 @@ function slotRoster(players) {
 
 export default function App() {
   const [phase, setPhase] = useState("setup");
+  const [authed, setAuthed] = useState(null); // null = checking, false = login, true = in
   const [cfg, setCfg] = useState({ league: "Family Feud-- B Leaguers", teams: 12, slot: 1, rounds: 16, keeper: false });
   const [players, setPlayers] = useState([]);
   const [boardMeta, setBoardMeta] = useState(null);
@@ -128,13 +129,21 @@ export default function App() {
   };
 
   useEffect(() => {
-    const league = localStorage.getItem(LAST_LEAGUE_KEY) || cfg.league;
-    const preset = LEAGUE_PRESETS.find((x) => x.name === league);
-    const saved = loadLeague(league);
-    const teams = saved?.cfg?.teams || (preset ? preset.teams : cfg.teams);
-    setCfg((c) => ({ ...c, league, teams, keeper: preset ? preset.keeper : c.keeper }));
-    applySaved(saved);
-    loadBoard(teams);
+    (async () => {
+      try {
+        const r = await fetch("/api/session");
+        const s = await r.json();
+        if (!s.authed) { setAuthed(false); return; }
+      } catch (_) { setAuthed(false); return; }
+      setAuthed(true);
+      const league = localStorage.getItem(LAST_LEAGUE_KEY) || cfg.league;
+      const preset = LEAGUE_PRESETS.find((x) => x.name === league);
+      const saved = loadLeague(league);
+      const teams = saved?.cfg?.teams || (preset ? preset.teams : cfg.teams);
+      setCfg((c) => ({ ...c, league, teams, keeper: preset ? preset.keeper : c.keeper }));
+      applySaved(saved);
+      loadBoard(teams);
+    })();
     // eslint-disable-next-line
   }, []);
 
@@ -416,6 +425,15 @@ Respond ONLY with JSON, no fences:
       {p.team}{p.adp ? ` · adp ${p.adp}` : ""}{p.lastFinish ? ` · '25 ${p.lastFinish}` : ""}
     </span>
   );
+
+  // ---------- AUTH GATE ----------
+  if (authed === null) {
+    return <div className="wr" style={{ display: "flex", alignItems: "center", justifyContent: "center", minHeight: "100vh" }}><style>{css}</style>
+      <div className="disp" style={{ fontSize: 18, letterSpacing: 3, color: "var(--acc)" }}>CHECKING ACCESS…</div></div>;
+  }
+  if (authed === false) {
+    return <LoginGate css={css} onSuccess={() => window.location.reload()} />;
+  }
 
   // ---------- SETUP ----------
   if (phase === "setup") {
@@ -784,6 +802,46 @@ function KeeperSheet({ players, keepers, teams, rounds, teamName, onSave, onClos
           </div>
           <button className="btn g" disabled={pid === ""} onClick={() => { setList((l) => [...l, { playerId: pid, teamSlot: slot, round: rd }]); setQ(""); setPid(""); }}>+ ADD KEEPER</button>
           <button className="btn p" onClick={() => { onSave(list); onClose(); }}>SAVE KEEPERS</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function LoginGate({ css, onSuccess }) {
+  const [pw, setPw] = useState("");
+  const [err, setErr] = useState("");
+  const [busy, setBusy] = useState(false);
+  const submit = async () => {
+    if (!pw || busy) return;
+    setBusy(true); setErr("");
+    try {
+      const r = await fetch("/api/login", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ password: pw }),
+      });
+      if (r.status === 429) { setErr("Too many attempts. Wait a few minutes."); return; }
+      if (!r.ok) { setErr("Invalid password."); return; }
+      onSuccess();
+    } catch (_) {
+      setErr("Connection error.");
+    } finally { setBusy(false); }
+  };
+  return (
+    <div className="wr" style={{ display: "flex", alignItems: "center", justifyContent: "center", minHeight: "100vh", padding: 18 }}>
+      <style>{css}</style>
+      <div style={{ width: "100%", maxWidth: 380 }}>
+        <div className="brand">◤ DRAFT WAR ROOM</div>
+        <div className="disp" style={{ fontSize: 34, fontWeight: 800, margin: "8px 0 18px" }}>RESTRICTED</div>
+        <div style={{ display: "grid", gap: 10 }}>
+          <input type="password" placeholder="Access password" value={pw} autoFocus
+            onChange={(e) => setPw(e.target.value)}
+            onKeyDown={(e) => e.key === "Enter" && submit()} />
+          <button className="btn p" style={{ padding: 13 }} disabled={busy || !pw} onClick={submit}>
+            {busy ? "…" : "ENTER"}
+          </button>
+          {err && <div style={{ color: "var(--red)", fontSize: 12 }}>{err}</div>}
         </div>
       </div>
     </div>
