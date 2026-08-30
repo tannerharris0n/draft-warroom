@@ -204,11 +204,17 @@ function espnCookieHeader() {
   return { Cookie: `espn_s2=${ESPN_S2}; SWID=${ESPN_SWID}` };
 }
 
+const espnHeaders = () => ({
+  ...espnCookieHeader(),
+  "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36",
+  Accept: "application/json",
+});
+
 async function espnPlayerMap() {
   return cached("espn:players", 24 * 60 * 60 * 1000, async () => {
     const url = `https://lm-api-reads.fantasy.espn.com/apis/v3/games/ffl/seasons/${SEASON}/players?view=players_wl`;
     const r = await fetch(url, {
-      headers: { "X-Fantasy-Filter": JSON.stringify({ filterActive: { value: true } }), ...espnCookieHeader() },
+      headers: { "X-Fantasy-Filter": JSON.stringify({ filterActive: { value: true } }), ...espnHeaders() },
     });
     if (!r.ok) throw new Error("espn players");
     const arr = await r.json();
@@ -223,7 +229,7 @@ app.get("/api/espn/draft", async (req, res) => {
   if (!/^\d{1,12}$/.test(leagueId)) return res.status(400).json({ error: "invalid league id" });
   try {
     const url = `https://lm-api-reads.fantasy.espn.com/apis/v3/games/ffl/seasons/${SEASON}/segments/0/leagues/${leagueId}?view=mDraftDetail`;
-    const r = await fetch(url, { headers: espnCookieHeader() });
+    const r = await fetch(url, { headers: espnHeaders() });
     if (!r.ok) throw new Error("espn " + r.status);
     const data = await r.json();
     const picks = data?.draftDetail?.picks || [];
@@ -243,6 +249,7 @@ app.get("/api/espn/draft", async (req, res) => {
       })),
     });
   } catch (e) {
+    console.error("espn error:", e.message);
     res.status(502).json({ error: "espn sync failed — check league id and cookies" });
   }
 });
