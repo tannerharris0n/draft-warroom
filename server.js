@@ -280,7 +280,7 @@ app.post("/api/analyze", analyzeLimiter, async (req, res) => {
 app.use(express.static(path.join(__dirname, "dist")));
 app.get("*", (_, res) => res.sendFile(path.join(__dirname, "dist", "index.html")));
 
-app.listen(PORT, () => {
+app.listen(PORT, "::", () => {
   if (!APP_PASSWORD) console.warn("WARNING: APP_PASSWORD not set — all API routes will refuse login");
   console.log(`war room on :${PORT}`);
 });
